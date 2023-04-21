@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE mapper
+      PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+   "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.edu.review">
+	
+	<!-- 검색 조건 -->
+	<sql id="searchMySQL">
+		<if test="searchType != null">
+			<if test="searchType == 's'.toString()">
+				AND review_subject LIKE CONCAT('%', #{keyword}, '%')
+			</if>
+			<if test="searchType == 'c'.toString()">
+				AND product_name LIKE CONCAT('%', #{keyword}, '%')
+			</if>
+			<if test="searchType == 'u'.toString()">
+				AND userID LIKE CONCAT('%', #{keyword}, '%')
+			</if>
+		</if>
+	</sql>	
+	
+	<!-- 리뷰 목록 가져오기 -->
+	<select id = "reviewList" parameterType="com.edu.common.util.SearchCriteria"  resultType = "com.edu.review.dto.ReviewDTO">
+		<![CDATA[
+			SELECT *
+			FROM (
+			SELECT review_bno, review_subject, review_content, userID, product_type, product_name, reply_count, review_date, review_star, ROW_NUMBER() OVER(ORDER BY review_bno DESC) AS rNUM
+			FROM t_review WHERE 1=1
+			]]>
+			<include refid="searchMySQL"/>
+			<![CDATA[
+			) brd
+			WHERE rNUM BETWEEN (#{perPageNum} * #{page} - 8) and (#{perPageNum} * #{page})
+			ORDER BY review_bno desc;
+		]]>
+	</select>
+
+	<!-- 전체 페이지 가져오기 -->
+	<select id = "reviewListTotalCount"  parameterType="com.edu.common.util.SearchCriteria"  resultType = "Integer">
+			select count(*) from t_review where 1=1
+			<include refid="searchMySQL"/>
+	</select>
+	
+	<!-- 리뷰 전체 리스트 가져오기 -->
+	<select id = "totalList" resultType = "com.edu.review.dto.ReviewDTO">
+			select * from t_review order by review_bno
+			<include refid="searchMySQL"/>
+	</select>
+	
+	<!-- 리뷰 등록하기 -->
+	<insert id = "reviewRegister" parameterType = "com.edu.review.dto.ReviewDTO">
+		<![CDATA[ 
+		insert into t_review(review_bno, userID, review_subject, review_content, product_type, product_name, review_date, review_star)
+		select ifnull(max(review_bno), 0) +1, #{userID}, #{review_subject}, #{review_content}, #{product_type}, #{product_name}, now(), #{review_star} from t_review
+		]]>
+	</insert>
+	
+	<!-- 리뷰별점 합계 -->
+	<update id="star_sum" parameterType = "com.edu.review.dto.ReviewDTO">
+		<![CDATA[ 
+		UPDATE t_product 
+		set review_count = review_count + 1, star_sum = star_sum + #{review_star} 
+		WHERE product_name = #{product_name};
+		]]>
+	</update>
+	
+	<!-- 리뷰별점 평균 -->
+	<update id="star_avg" parameterType = "com.edu.review.dto.ReviewDTO">
+		<![CDATA[ 
+		UPDATE t_product 
+		SET star_avg = ROUND(star_sum / review_count, 1)
+		WHERE product_name = #{product_name};
+		]]>
+	</update>
+	
+	<!-- 리뷰여부 확인 -->
+   <update id="reviewYN" parameterType="Map">
+      UPDATE t_orderproduct 
+      set review_yn ='Y'
+      WHERE order_num=#{order_num} and product_code=#{product_code}
+   </update>
+   
+   <!-- 리뷰등록 상품 타입이름가져오기 -->
+   <select id="productReviewdata" parameterType="String" resultType="com.edu.product.dto.ProductDTO">
+      SELECT product_name,product_type 
+      FROM t_product 
+      WHERE product_code=#{product_code}
+   </select>
+			
+	<select id="productList" resultType="com.edu.review.dto.ReviewDTO" parameterType = "com.edu.product.dto.ProductDTO">
+		<![CDATA[
+		SELECT r.review_bno, r.userID, r.review_subject, r.review_content, r.review_date, r.review_star
+		FROM t_product p , t_review r
+		]]>
+	</select>
+	
+	<!-- 타입에 따른 상품명 찾기 -->
+	
+	<select id="searchname" resultType="com.edu.product.dto.ProductDTO" parameterType = "String">
+		select product_name
+		from t_product
+		where product_type = #{product_type}
+	</select>
+	
+	<!-- 타입에 따른 상품명 찾기2 -->
+	<select id="searchname2" resultType="com.edu.product.dto.ProductDTO" parameterType = "String">
+		select product_name
+		from t_product
+		where product_type = #{product_type}
+	</select>
+	
+	
+	<!-- 리뷰 상세페이지 보여주기  -->
+	<select id = "detail" parameterType = "int" resultType = "com.edu.review.dto.ReviewDTO">
+		<![CDATA[
+			select * from t_review where review_bno = #{review_bno};
+		]]>
+	</select>
+	
+	<!-- 리뷰 수정 -->
+	<select id = "updateReview" parameterType = "com.edu.review.dto.ReviewDTO">
+		<![CDATA[
+			update t_review set review_subject = #{review_subject}, userID = #{userID}, review_content = #{review_content}, product_type = #{product_type}, product_name = #{product_name}, review_star = #{review_star} where review_bno = #{review_bno};
+		]]>
+	</select>
+	
+	<!-- 리뷰 삭제 -->
+	<select id = "deleteReview" parameterType = "int">
+		<![CDATA[
+			delete from t_review where review_bno = #{review_bno}
+		]]>
+	</select>
+	
+	
+	<!-- 댓글 관련 시작 -->
+	
+	<!-- 리뷰에 해당하는 댓글 등록하기 -->
+	<insert id = "reviewCommentRegister" parameterType = "com.edu.review.dto.ReviewCommentDTO">
+		<![CDATA[
+			insert into t_reviewcomment (reply_bno, imsi_bno, review_bno, userID, reply_content, reply_regDate)
+			select ifnull(max(reply_bno),0) + 1, ifnull(max(imsi_bno),0) + 1, #{review_bno}, #{userID}, #{reply_content}, now() from t_reviewcomment where review_bno = #{review_bno};
+		]]>
+	</insert>
+	
+	<!--  리뷰에 해당하는 댓글 수 구하기 -->
+	<select id = "commentListCount" parameterType = "Integer" resultType = "Integer">
+		<![CDATA[
+			select count(*) from t_reviewcomment where review_bno = #{review_bno};
+		]]>
+	</select>
+	
+	<!-- 리뷰 댓글 목록 가져오기 -->
+	<select id = "commentList" parameterType = "Integer" resultType = "com.edu.review.dto.ReviewCommentDTO">
+		<![CDATA[
+			select * from t_reviewcomment where review_bno = #{review_bno} order by imsi_bno;
+		]]>
+	</select>
+	
+	<!-- 게시판 리스트 제목에 댓글 수 표시 -->
+	<update id = "updateReplyCount" parameterType = "int">
+		update t_review r
+		set r.reply_count = (select count(reply_bno) from t_reviewcomment where review_bno = #{review_bno})
+		where r.review_bno = #{review_bno}
+	</update>
+	
+	<!-- 댓글 삭제 -->
+	<delete id = "replyDelete" parameterType = "int">
+		<![CDATA[
+			delete from t_reviewcomment where imsi_bno = #{imsi_bno};
+		]]>
+	</delete>
+	
+	<!-- 댓글 수정하기 -->
+	<update id = "replyUpdate" parameterType = "com.edu.review.dto.ReviewCommentDTO">
+		<![CDATA[
+			update t_reviewcomment set reply_content = #{reply_content}, userID = #{userID}, reply_bno = #{reply_bno} where review_bno = #{review_bno} and imsi_bno =#{imsi_bno};
+		]]>
+	</update>
+	
+	
+	<select id="review_bno" parameterType="com.edu.review.dto.ReviewDTO" resultType = "Integer">
+		select Max(review_bno)
+		from t_review
+	</select>
+	
+	<!--  리뷰사진등록 -->
+	
+	<insert id="imagesRegister" parameterType="com.edu.review.dto.ReviewImagesDTO">
+		insert into t_reviewimages(review_bno, images01, images02)
+		values (#{review_bno}, #{images01}, #{images02})
+	</insert>
+
+	<!-- 리뷰 사진리스트 가져오기 -->	
+	
+	<select id= "ImagesName" parameterType="Integer" resultType="com.edu.review.dto.ReviewImagesDTO">
+		select *
+		from t_reviewimages
+		where review_bno = #{review_bno}
+	</select>
+	
+	<!-- 리뷰 이미지 수정 -->
+	
+	<update id = "imagesUpdate" parameterType = "com.edu.review.dto.ReviewImagesDTO">
+		<![CDATA[
+		update t_reviewimages
+		set review_bno = #{review_bno}, images01 = #{images01}, images02 = #{images02}
+		where review_bno = #{review_bno}
+		]]>
+	</update>
+	
+	<!-- 리뷰 전체 가져오기 -->
+	<select id="images" parameterType="Integer" resultType="com.edu.review.dto.ReviewImagesDTO">
+			SELECT * FROM t_reviewimages WHERE review_bno = #{review_bno};
+	</select>
+	
+	<select id = "ImagesName1" parameterType="Integer" resultType="String">
+			select images01 from t_reviewimages where review_bno = #{review_bno};
+	</select>
+
+</mapper>
+
+
+
+
+
+
